@@ -150,3 +150,48 @@ class User:
         encoded_type_channel = quote(f"{type}#{channel}", safe='')
         return self.make_api_request("DELETE", f"/templates/{encoded_type_channel}?context={context}")
     
+    def create_user_preferences(self, context, preferences=None, timezone=None, language=None):
+        """Create user preferences"""
+        body = {"context": context}
+        if preferences:
+            body["preferences"] = preferences
+        if timezone:
+            body["timezone"] = timezone
+        if language:
+            body["language"] = language
+        return self.make_api_request("POST", "/preferences", body=body)
+    
+    def get_user_preferences(self, context):
+        """Get user preferences by context"""
+        return self.make_api_request("GET", f"/preferences?context={context}")
+    
+    def get_user_preferences_list(self, limit=None, next_token=None):
+        """List all user preferences (super admin only)"""
+        query_params = []
+        if limit:
+            query_params.append(f"limit={limit}")
+        if next_token:
+            query_params.append(f"nextToken={next_token}")
+        
+        query_string = "&".join(query_params)
+        path = "/preferences"
+        if query_string:
+            path += f"?{query_string}"
+        
+        return self.make_api_request("GET", path)
+    
+    def update_user_preferences(self, context, preferences=None, timezone=None, language=None):
+        """Update user preferences"""
+        body = {"context": context}
+        if preferences is not None:
+            body["preferences"] = preferences
+        if timezone is not None:
+            body["timezone"] = timezone
+        if language is not None:
+            body["language"] = language
+        return self.make_api_request("PUT", "/preferences", body=body)
+    
+    def delete_user_preferences(self, context):
+        """Delete user preferences by context"""
+        return self.make_api_request("DELETE", f"/preferences?context={context}")
+    

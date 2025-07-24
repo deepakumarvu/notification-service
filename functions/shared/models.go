@@ -28,6 +28,22 @@ type Template struct {
 	UpdatedAt   *time.Time `json:"updatedAt,omitempty" dynamodbav:"updatedAt,omitempty"`
 }
 
+// UserPreferences represents user notification preferences
+type UserPreferences struct {
+	Context     string                    `json:"context" dynamodbav:"context"` // "*" for global, userId for user-specific
+	Preferences map[string]PreferenceItem `json:"preferences,omitempty" dynamodbav:"preferences,omitempty"`
+	Timezone    string                    `json:"timezone,omitempty" dynamodbav:"timezone,omitempty"`
+	Language    string                    `json:"language,omitempty" dynamodbav:"language,omitempty"`
+	CreatedAt   *time.Time                `json:"createdAt,omitempty" dynamodbav:"createdAt,omitempty"`
+	UpdatedAt   *time.Time                `json:"updatedAt,omitempty" dynamodbav:"updatedAt,omitempty"`
+}
+
+// PreferenceItem represents preferences for a notification type
+type PreferenceItem struct {
+	Channels []string `json:"channels,omitempty" dynamodbav:"channels,omitempty"`
+	Enabled  *bool    `json:"enabled,omitempty" dynamodbav:"enabled,omitempty"`
+}
+
 // APIResponse represents a standard API response
 type APIResponse struct {
 	StatusCode int               `json:"statusCode"`

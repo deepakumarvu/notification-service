@@ -13,6 +13,7 @@ from aws_cdk import (
 )
 from constructs import Construct
 import os
+import time
 
 class NotificationServiceStack(Stack):
 
@@ -81,6 +82,20 @@ class NotificationServiceStack(Stack):
             removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
         )
         
+        # User Preferences table
+        self.preferences_table = dynamodb.Table(
+            self, f"Preferences-{self.environment_name}",
+            table_name=f"notification-service-preferences-{self.environment_name}",
+            partition_key=dynamodb.Attribute(
+                name="context",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            point_in_time_recovery=True,
+            removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
+        )
+        
     def _create_cognito_user_pool(self):
         """Create Cognito User Pool for authentication"""
         
@@ -122,6 +137,7 @@ class NotificationServiceStack(Stack):
         lambda_environment = {
             "USERS_TABLE": self.users_table.table_name,
             "TEMPLATES_TABLE": self.templates_table.table_name,
+            "PREFERENCES_TABLE": self.preferences_table.table_name,
             "USER_POOL_ID": self.user_pool.user_pool_id,
             "ENVIRONMENT": self.environment_name,
             "REGION": self.region
@@ -139,6 +155,7 @@ class NotificationServiceStack(Stack):
         # Grant permissions to DynamoDB tables
         self.users_table.grant_read_write_data(lambda_role)
         self.templates_table.grant_read_write_data(lambda_role)
+        self.preferences_table.grant_read_write_data(lambda_role)
         
         # Grant permissions to Cognito
         lambda_role.add_to_policy(
@@ -169,6 +186,20 @@ class NotificationServiceStack(Stack):
             runtime=_lambda.Runtime.PROVIDED_AL2,
             handler="bootstrap",
             code=_lambda.Code.from_asset("./build/template"),
+            environment=lambda_environment,
+            role=lambda_role,
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            log_retention=logs.RetentionDays.ONE_WEEK
+        )
+
+        # Preference Handler Lambda
+        self.preference_handler = _lambda.Function(
+            self, f"PreferenceHandler-{self.environment_name}",
+            function_name=f"NotificationService-PreferenceHandler-{self.environment_name}",
+            runtime=_lambda.Runtime.PROVIDED_AL2,
+            handler="bootstrap",
+            code=_lambda.Code.from_asset("./build/preference"),
             environment=lambda_environment,
             role=lambda_role,
             timeout=Duration.seconds(30),
@@ -240,6 +271,26 @@ class NotificationServiceStack(Stack):
         template_resource.add_method(
             "DELETE", 
             apigateway.LambdaIntegration(self.template_handler),
+        )
+        
+        # Preferences endpoints
+        preferences_resource = api_v1.add_resource("preferences")
+        
+        preferences_resource.add_method(
+            "GET", 
+            apigateway.LambdaIntegration(self.preference_handler),
+        )
+        preferences_resource.add_method(
+            "POST", 
+            apigateway.LambdaIntegration(self.preference_handler),
+        )
+        preferences_resource.add_method(
+            "PUT", 
+            apigateway.LambdaIntegration(self.preference_handler),
+        )
+        preferences_resource.add_method(
+            "DELETE", 
+            apigateway.LambdaIntegration(self.preference_handler),
         )
         
 
