@@ -12,7 +12,7 @@ const (
 	ColUserID = "userId"
 )
 
-func GetUsersList(ctx context.Context, limit int, startKey string) ([]shared.User, *string, error) {
+func GetUsersList(ctx context.Context, limit int, startKey string) ([]shared.User, string, error) {
 	// Handle pagination
 	var lastEvaluatedKey map[string]types.AttributeValue
 	if startKey != "" {
@@ -27,14 +27,14 @@ func GetUsersList(ctx context.Context, limit int, startKey string) ([]shared.Use
 	lastEvaluatedKey, err := services.DbScanItems(ctx, shared.UsersTable, nil, nil, lastEvaluatedKey, limit, &users)
 	if err != nil {
 		shared.LogError().Err(err).Msg("Failed to scan users table")
-		return nil, nil, err
+		return nil, "", err
 	}
 
-	var nextKey *string
+	var nextKey string
 	if lastEvaluatedKey != nil {
 		if userID, ok := lastEvaluatedKey[ColUserID]; ok {
 			if userIDVal, ok := userID.(*types.AttributeValueMemberS); ok {
-				nextKey = &userIDVal.Value
+				nextKey = userIDVal.Value
 			}
 		}
 	}

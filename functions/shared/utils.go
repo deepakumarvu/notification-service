@@ -34,16 +34,18 @@ var (
 
 // Environment variables
 var (
-	UsersTable  string
-	UserPoolID  string
-	Environment string
-	Region      string
+	UsersTable     string
+	TemplatesTable string
+	UserPoolID     string
+	Environment    string
+	Region         string
 )
 
 // InitAWS initializes AWS service clients and environment variables
 func InitAWS() {
 	// Initialize environment variables
 	UsersTable = os.Getenv("USERS_TABLE")
+	TemplatesTable = os.Getenv("TEMPLATES_TABLE")
 	UserPoolID = os.Getenv("USER_POOL_ID")
 	Environment = os.Getenv("ENVIRONMENT")
 	Region = os.Getenv("REGION")

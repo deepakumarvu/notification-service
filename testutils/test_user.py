@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 import jwt
 import requests
 import logging
+from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -114,7 +115,10 @@ class User:
             "Authorization": f"{self.id_token}",
             "Content-Type": "application/json"
         }
+        # Print Request
+        logger.info(f"Making {method} request to {self.api_gateway_url}api/v1{path}, headers: {headers}, body: {body}")
         response = requests.request(method, f"{self.api_gateway_url}api/v1{path}", headers=headers, json=body)
+        logger.info(f"Response: {response.text}")
         return response
     
     def get_users_list(self):
@@ -122,3 +126,27 @@ class User:
     
     def get_user_by_id(self, user_id):
         return self.make_api_request("GET", f"/users/{user_id}")
+    
+    def create_template(self, context, type, channel, content):
+        return self.make_api_request("POST", "/templates", body={
+            "context": context,
+            "type": type,
+            "channel": channel,
+            "content": content
+        })
+    
+    def get_templates_list(self, context):
+        return self.make_api_request("GET", f"/templates?context={context}")
+    
+    def get_template_by_id(self, context, type, channel):
+        encoded_type_channel = quote(f"{type}#{channel}", safe='')
+        return self.make_api_request("GET", f"/templates/{encoded_type_channel}?context={context}")
+    
+    def update_template(self, context, type, channel, content):
+        encoded_type_channel = quote(f"{type}#{channel}", safe='')
+        return self.make_api_request("PUT", f"/templates/{encoded_type_channel}", body={"context": context, "type": type, "channel": channel, "content": content})
+    
+    def delete_template(self, context, type, channel):
+        encoded_type_channel = quote(f"{type}#{channel}", safe='')
+        return self.make_api_request("DELETE", f"/templates/{encoded_type_channel}?context={context}")
+    

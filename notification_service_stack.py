@@ -63,6 +63,24 @@ class NotificationServiceStack(Stack):
             projection_type=dynamodb.ProjectionType.ALL
         )
         
+        # Templates table
+        self.templates_table = dynamodb.Table(
+            self, f"Templates-{self.environment_name}",
+            table_name=f"notification-service-templates-{self.environment_name}",
+            partition_key=dynamodb.Attribute(
+                name="context",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="type#channel",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            point_in_time_recovery=True,
+            removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
+        )
+        
     def _create_cognito_user_pool(self):
         """Create Cognito User Pool for authentication"""
         
@@ -103,6 +121,7 @@ class NotificationServiceStack(Stack):
         # Common Lambda configuration
         lambda_environment = {
             "USERS_TABLE": self.users_table.table_name,
+            "TEMPLATES_TABLE": self.templates_table.table_name,
             "USER_POOL_ID": self.user_pool.user_pool_id,
             "ENVIRONMENT": self.environment_name,
             "REGION": self.region
@@ -119,6 +138,7 @@ class NotificationServiceStack(Stack):
         
         # Grant permissions to DynamoDB tables
         self.users_table.grant_read_write_data(lambda_role)
+        self.templates_table.grant_read_write_data(lambda_role)
         
         # Grant permissions to Cognito
         lambda_role.add_to_policy(
@@ -141,7 +161,20 @@ class NotificationServiceStack(Stack):
             memory_size=256,
             log_retention=logs.RetentionDays.ONE_WEEK
         )
-        
+
+        # Template Handler Lambda
+        self.template_handler = _lambda.Function(
+            self, f"TemplateHandler-{self.environment_name}",
+            function_name=f"NotificationService-TemplateHandler-{self.environment_name}",
+            runtime=_lambda.Runtime.PROVIDED_AL2,
+            handler="bootstrap",
+            code=_lambda.Code.from_asset("./build/template"),
+            environment=lambda_environment,
+            role=lambda_role,
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            log_retention=logs.RetentionDays.ONE_WEEK
+        )
 
     def _create_api_gateway(self):
         """Create API Gateway for the REST API"""
@@ -182,6 +215,31 @@ class NotificationServiceStack(Stack):
         user_resource.add_method(
             "GET", 
             apigateway.LambdaIntegration(self.user_handler),
+        )
+        
+        # Templates endpoints
+        templates_resource = api_v1.add_resource("templates")
+        template_resource = templates_resource.add_resource("{templateId}")
+        
+        templates_resource.add_method(
+            "GET", 
+            apigateway.LambdaIntegration(self.template_handler),
+        )
+        templates_resource.add_method(
+            "POST", 
+            apigateway.LambdaIntegration(self.template_handler),
+        )
+        template_resource.add_method(
+            "GET", 
+            apigateway.LambdaIntegration(self.template_handler),
+        )
+        template_resource.add_method(
+            "PUT", 
+            apigateway.LambdaIntegration(self.template_handler),
+        )
+        template_resource.add_method(
+            "DELETE", 
+            apigateway.LambdaIntegration(self.template_handler),
         )
         
 
