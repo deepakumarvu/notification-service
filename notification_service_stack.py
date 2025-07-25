@@ -8,6 +8,9 @@ from aws_cdk import (
     aws_lambda_event_sources as lambda_event_sources,
     aws_apigateway as apigateway,
     aws_cognito as cognito,
+    aws_sqs as sqs,
+    aws_events as events,
+    aws_events_targets as targets,
     aws_iam as iam,
     aws_logs as logs,
 )
@@ -53,7 +56,7 @@ class NotificationServiceStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
-            point_in_time_recovery=True,
+            point_in_time_recovery=False if self.environment_name == "dev" else True,
             removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
         )
         
@@ -81,7 +84,7 @@ class NotificationServiceStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
-            point_in_time_recovery=True,
+            point_in_time_recovery=False if self.environment_name == "dev" else True,
             removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
         )
         
@@ -109,10 +112,25 @@ class NotificationServiceStack(Stack):
             ),
             billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
             encryption=dynamodb.TableEncryption.AWS_MANAGED,
-            point_in_time_recovery=True,
+            point_in_time_recovery=False if self.environment_name == "dev" else True,
             removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
         )
         
+        # Notification Validation table - for storing test notification results
+        self.notification_validation_table = dynamodb.Table(
+            self, f"NotificationValidation-{self.environment_name}",
+            table_name=f"notification-service-validation-{self.environment_name}",
+            partition_key=dynamodb.Attribute(
+                name="id#userId#type#channel",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            time_to_live_attribute="expiresAt",
+            point_in_time_recovery=False if self.environment_name == "dev" else True,
+            removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
+        )
+
     def _create_cognito_user_pool(self):
         """Create Cognito User Pool for authentication"""
         
@@ -177,6 +195,7 @@ class NotificationServiceStack(Stack):
             "TEMPLATES_TABLE": self.templates_table.table_name,
             "PREFERENCES_TABLE": self.preferences_table.table_name,
             "CONFIG_TABLE": self.config_table.table_name,
+            "NOTIFICATION_VALIDATION_TABLE": self.notification_validation_table.table_name,
             "NOTIFICATION_QUEUE_URL": self.notification_queue.queue_url,
             "NOTIFICATION_TOPIC_ARN": self.notification_topic.topic_arn,
             "USER_POOL_ID": self.user_pool.user_pool_id,
@@ -198,6 +217,7 @@ class NotificationServiceStack(Stack):
         self.templates_table.grant_read_write_data(lambda_role)
         self.preferences_table.grant_read_write_data(lambda_role)
         self.config_table.grant_read_write_data(lambda_role)
+        self.notification_validation_table.grant_read_write_data(lambda_role)
         
         # Grant permissions to Cognito
         lambda_role.add_to_policy(
@@ -439,4 +459,10 @@ class NotificationServiceStack(Stack):
             self, "NotificationQueueARN",
             value=self.notification_queue.queue_arn,
             description="Notification Queue ARN"
+        )
+
+        CfnOutput(
+            self, "NotificationValidationTable",
+            value=self.notification_validation_table.table_name,
+            description="Notification Validation Table"
         )

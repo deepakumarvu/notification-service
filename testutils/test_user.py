@@ -120,7 +120,7 @@ class User:
             "Content-Type": "application/json"
         }
         # Print Request
-        logger.info(f"Making {method} request to {self.api_gateway_url}api/v1{path}, headers: {headers}, body: {body}")
+        logger.info(f"Making {method} request to {self.api_gateway_url}api/v1{path}, body: {body}")
         response = requests.request(method, f"{self.api_gateway_url}api/v1{path}", headers=headers, json=body)
         logger.info(f"Response: {response.text}")
         return response
@@ -257,7 +257,7 @@ class User:
                 QueueUrl=self.notification_queue_url,
                 MessageBody=json.dumps(message_body)
             )
-            logger.info(f"Sent {notification_type} notification to queue. MessageId: {response['MessageId']}")
+            logger.info(f"Sent {notification_type} notification to queue. MessageId: {id}")
             return response
         except Exception as e:
             logger.error(f"Failed to send notification to queue: {e}")
@@ -273,10 +273,10 @@ class User:
         }
         return self.send_notification_to_queue(id, "alert", recipients, variables)
     
-    def send_report_notification(self, id, recipients, report_name, time_period, summary="Report generated"):
+    def send_report_notification(self, id, recipients, report_type, time_period, summary="Report generated"):
         """Send a report notification"""
         variables = {
-            "reportType": report_name,
+            "reportType": report_type,
             "period": time_period,
             "data": summary,
         }

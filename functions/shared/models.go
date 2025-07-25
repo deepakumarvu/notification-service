@@ -112,6 +112,15 @@ type PaginatedResponse struct {
 	Count     int    `json:"count"`
 }
 
+// NotificationValidation represents a notification validation
+type NotificationValidation struct {
+	IDUserIDTypeChannel string     `json:"id#userId#type#channel" dynamodbav:"id#userId#type#channel"`
+	Content             string     `json:"content,omitempty" dynamodbav:"content,omitempty"`
+	CreatedAt           *time.Time `json:"createdAt,omitempty" dynamodbav:"createdAt,omitempty"`
+	Error               string     `json:"error,omitempty" dynamodbav:"error,omitempty"`
+	ExpiresAt           int        `json:"expiresAt,omitempty" dynamodbav:"expiresAt,omitempty"` // 1 day expiration
+}
+
 // Constants for notification types
 const (
 	NotificationTypeAlert        = "alert"

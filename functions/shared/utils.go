@@ -34,13 +34,16 @@ var (
 
 // Environment variables
 var (
-	UsersTable           string
-	TemplatesTable       string
-	PreferencesTable     string
-	ConfigTable          string
-	UserPoolID           string
-	Environment          string
-	Region               string
+	UsersTable                  string
+	TemplatesTable              string
+	PreferencesTable            string
+	ConfigTable                 string
+	NotificationValidationTable string
+	NotificationQueueURL        string
+	NotificationTopicARN        string
+	UserPoolID                  string
+	Environment                 string
+	Region                      string
 )
 
 // InitAWS initializes AWS service clients and environment variables
@@ -50,6 +53,9 @@ func InitAWS() {
 	TemplatesTable = os.Getenv("TEMPLATES_TABLE")
 	PreferencesTable = os.Getenv("PREFERENCES_TABLE")
 	ConfigTable = os.Getenv("CONFIG_TABLE")
+	NotificationValidationTable = os.Getenv("NOTIFICATION_VALIDATION_TABLE")
+	NotificationQueueURL = os.Getenv("NOTIFICATION_QUEUE_URL")
+	NotificationTopicARN = os.Getenv("NOTIFICATION_TOPIC_ARN")
 	UserPoolID = os.Getenv("USER_POOL_ID")
 	Environment = os.Getenv("ENVIRONMENT")
 	Region = os.Getenv("REGION")
@@ -183,6 +189,11 @@ func GetUserContext(requestContext events.APIGatewayProxyRequestContext) (UserCo
 // BuildTypeChannel creates the composite key for templates
 func BuildTypeChannel(notificationType, channel string) string {
 	return notificationType + "#" + channel
+}
+
+// BuildIDUserIDTypeChannel creates the composite key for notification validations
+func BuildIDUserIDTypeChannel(id, userId, notificationType, channel string) string {
+	return id + "#" + userId + "#" + notificationType + "#" + channel
 }
 
 // ParseTypeChannel splits the composite key into type and channel

@@ -84,10 +84,11 @@ type ProcessingResult struct {
 // ProcessedNotification represents a single processed notification
 type ProcessedNotification struct {
 	RecipientID string `json:"recipientId"`
+	Type        string `json:"type"`
 	Channel     string `json:"channel"`
 	Content     string `json:"content"`
 	Success     bool   `json:"success"`
-	Error       string `json:"error,omitempty"`
+	Error       string `json:"error,omitempty"` // error message if failed
 }
 
 // ProcessNotificationRequest processes a notification request for all recipients
@@ -116,7 +117,29 @@ func ProcessNotificationRequest(ctx context.Context, request shared.Notification
 				Success:     false,
 				Error:       err.Error(),
 			})
+
+			// Add failed notification record to notification validation
+			err = db.CreateNotificationValidation(ctx, shared.NotificationValidation{
+				IDUserIDTypeChannel: shared.BuildIDUserIDTypeChannel(request.ID, recipientID, request.Type, ""),
+				Content:             "",
+				Error:               err.Error(),
+			})
+			if err != nil {
+				shared.LogError().Err(err).Str("recipientId", recipientID).Msg("Failed to create notification validation")
+			}
 			continue
+		}
+
+		// Add successful notifications to notification validation
+		for _, notification := range notifications {
+			err := db.CreateNotificationValidation(ctx, shared.NotificationValidation{
+				IDUserIDTypeChannel: shared.BuildIDUserIDTypeChannel(request.ID, recipientID, request.Type, notification.Channel),
+				Content:             notification.Content,
+				Error:               notification.Error,
+			})
+			if err != nil {
+				shared.LogError().Err(err).Str("recipientId", recipientID).Msg("Failed to create notification validation")
+			}
 		}
 
 		// Add successful notifications
@@ -164,6 +187,7 @@ func processRecipient(ctx context.Context, recipientID string, request shared.No
 			shared.LogError().Err(err).Str("recipientId", recipientID).Str("channel", channel).Msg("Failed to process template")
 			notifications = append(notifications, ProcessedNotification{
 				RecipientID: recipientID,
+				Type:        request.Type,
 				Channel:     channel,
 				Success:     false,
 				Error:       err.Error(),

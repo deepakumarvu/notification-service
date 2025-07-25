@@ -3,6 +3,9 @@ from testutils.test_user import User
 import os
 import json
 import time
+import boto3
+from boto3.dynamodb.conditions import Key
+import uuid
 
 with open('cdk-outputs.json', 'r') as f:
     data = json.load(f)
@@ -14,7 +17,20 @@ USER_POOL_ID = data[f"NotificationService-{ENVIRONMENT}"]["UserPoolId"]
 USER_POOL_CLIENT_ID = data[f"NotificationService-{ENVIRONMENT}"]["UserPoolClientId"]
 API_GATEWAY_URL = data[f"NotificationService-{ENVIRONMENT}"]["APIGatewayURL"]
 NOTIFICATION_QUEUE_URL = data[f"NotificationService-{ENVIRONMENT}"]["NotificationQueueURL"]
+NOTIFICATION_VALIDATION_TABLE = data[f"NotificationService-{ENVIRONMENT}"]["NotificationValidationTable"]
+
+dynamodb = boto3.client('dynamodb', region_name=REGION)
     
+def get_notification_validation_data(id, userId, type, channel):
+    response = dynamodb.get_item(
+        TableName=NOTIFICATION_VALIDATION_TABLE,
+        Key={
+            'id#userId#type#channel': {
+                'S': f"{id}#{userId}#{type}#{channel}"
+            }
+        }
+    )
+    return response["Item"]
 
 @pytest.fixture(scope="session")
 def test_super_admin():
@@ -627,9 +643,9 @@ def test_notification_queue_publishing(test_super_admin: User, test_user: User):
     # Setup Global Template, Preferences, System Config
     response = test_super_admin.create_template("*", "alert", "email", "{\"subject\": \"There is an alert in {{serverName}} in {{environment}}\", \"body\": \"There is an alert in {{serverName}} in {{environment}} with status {{status}} and message {{message}}\"}")
     print(response.json())
-    response = test_super_admin.create_template("*", "alert", "slack", "Alert: {{serverName}} is {{status}} in {{environment}}")
+    response = test_super_admin.create_template("*", "alert", "slack", "Alert: {{serverName}} is {{status}} in {{environment}} with message {{message}}")
     print(response.json())
-    response = test_super_admin.create_template("*", "alert", "in_app", "Alert: {{serverName}} is {{status}} in {{environment}}")
+    response = test_super_admin.create_template("*", "alert", "in_app", "Alert: {{serverName}} is {{status}} in {{environment}} with message {{message}}")
     print(response.json())
     
     response = test_super_admin.create_template("*", "report", "email", "{\"subject\": \"There is a report in {{reportType}} for {{period}}\", \"body\": \"There is a report in {{reportType}} for {{period}} with data {{data}}\"}")
@@ -653,8 +669,21 @@ def test_notification_queue_publishing(test_super_admin: User, test_user: User):
                                                 "inApp": {"enabled": True}}, "Global config")
     print(response.json())
     
+    # Create user preferences
+    response = test_user.create_user_preferences(test_user.user_id, {"alert": {"channels": ["email", "slack"], "enabled": True}, "report": {"channels": ["slack", "in_app"], "enabled": True}, "notification": {"channels": ["in_app"], "enabled": True}}, "UTC", "en")
+    print(response.json())
+    
+    # Create User Template
+    response = test_user.create_template(test_user.user_id, "notification", "in_app", "User Notification: {{title}} is {{message}} with {{actionUrl}}")
+    print(response.json())
+    
+    alert_id = str(uuid.uuid4())
+    report_id = str(uuid.uuid4())
+    notification_id = str(uuid.uuid4())
+    
     # Test sending alert notification
     alert_response = test_user.send_alert_notification(
+        id=alert_id,
         recipients=[test_user.user_id, test_super_admin.user_id],
         server_name="web-server-01",
         environment="production",
@@ -665,8 +694,9 @@ def test_notification_queue_publishing(test_super_admin: User, test_user: User):
     
     # Test sending report notification
     report_response = test_super_admin.send_report_notification(
+        id=report_id,
         recipients=[test_super_admin.user_id],
-        report_name="Weekly Performance Report",
+        report_type="Weekly Performance Report",
         time_period="2024-01-01 to 2024-01-07",
         summary="System performance metrics for the past week"
     )
@@ -675,28 +705,42 @@ def test_notification_queue_publishing(test_super_admin: User, test_user: User):
     # Test sending general notification
     notification_response = test_user.send_general_notification(
         recipients=[test_user.user_id],
+        id=notification_id,
         title="System Maintenance",
         message="Scheduled maintenance will begin at 2 AM UTC",
         action_url="https://example.com/acknowledge"
     )
     assert "MessageId" in notification_response
     
-    # Test custom notification with custom variables
-    custom_response = test_super_admin.send_notification_to_queue(
-        notification_type="alert",
-        recipients=[test_user.user_id],
-        variables={
-            "serverName": "database-01",
-            "environment": "staging",
-            "status": "warning",
-            "message": "Disk space running low",
-        }
-    )
-    assert "MessageId" in custom_response
+    # Sleep for 5 seconds
+    time.sleep(5)
     
-    # TODO: Validate the notifications sent to the users
+    # Validate the notifications sent to the users
     
-    time.sleep(15)
+    # In App notification should not be sent to the user
+    try:
+        alert_validation = get_notification_validation_data(alert_id, test_user.user_id, "alert", "in_app")
+    except KeyError as e:
+        assert True
+    except Exception as e:
+        assert False
+    
+    alert_validation = get_notification_validation_data(alert_id, test_user.user_id, "alert", "slack")
+    assert alert_validation["content"]["S"] == "Alert: web-server-01 is critical in production with message High CPU usage detected"
+    assert "error" not in alert_validation
+    
+    report_validation = get_notification_validation_data(alert_id, test_super_admin.user_id, "alert", "in_app")
+    assert report_validation["content"]["S"] == "Alert: web-server-01 is critical in production with message High CPU usage detected"
+    assert "error" not in report_validation
+    
+    report_validation = get_notification_validation_data(report_id, test_super_admin.user_id, "report", "email")
+    assert report_validation["content"]["S"] == "{\"body\":\"There is a report in Weekly Performance Report for 2024-01-01 to 2024-01-07 with data System performance metrics for the past week\",\"subject\":\"There is a report in Weekly Performance Report for 2024-01-01 to 2024-01-07\"}"
+    assert "error" not in report_validation
+    
+    # Specific user template should be sent to the user
+    notification_validation = get_notification_validation_data(notification_id, test_user.user_id, "notification", "in_app")
+    assert notification_validation["content"]["S"] == "User Notification: System Maintenance is Scheduled maintenance will begin at 2 AM UTC with https://example.com/acknowledge"
+    assert "error" not in notification_validation
     
     # Clean up
     test_super_admin.delete_template("*", "alert", "email")
@@ -710,3 +754,5 @@ def test_notification_queue_publishing(test_super_admin: User, test_user: User):
     test_super_admin.delete_template("*", "notification", "in_app")
     test_super_admin.delete_user_preferences("*")
     test_super_admin.delete_system_config("*")
+    test_user.delete_template(test_user.user_id, "notification", "in_app")
+    test_user.delete_user_preferences(test_user.user_id)
