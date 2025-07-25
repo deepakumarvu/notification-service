@@ -9,8 +9,6 @@ from aws_cdk import (
     aws_apigateway as apigateway,
     aws_cognito as cognito,
     aws_sqs as sqs,
-    aws_events as events,
-    aws_events_targets as targets,
     aws_iam as iam,
     aws_logs as logs,
 )
@@ -102,6 +100,34 @@ class NotificationServiceStack(Stack):
             removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
         )
         
+        # Scheduled Notifications table
+        self.schedules_table = dynamodb.Table(
+            self, f"Schedules-{self.environment_name}",
+            table_name=f"notification-service-schedules-{self.environment_name}",
+            partition_key=dynamodb.Attribute(
+                name="scheduleId",
+                type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            encryption=dynamodb.TableEncryption.AWS_MANAGED,
+            point_in_time_recovery=False if self.environment_name == "dev" else True,
+            removal_policy=RemovalPolicy.DESTROY if self.environment_name == "dev" else RemovalPolicy.RETAIN
+        )
+        
+        # GSI1: userId + createdAt for user's schedules
+        self.schedules_table.add_global_secondary_index(
+            index_name="UserIndex",
+            partition_key=dynamodb.Attribute(
+                name="userId",
+                type=dynamodb.AttributeType.STRING
+            ),
+            sort_key=dynamodb.Attribute(
+                name="createdAt",
+                type=dynamodb.AttributeType.STRING
+            ),
+            projection_type=dynamodb.ProjectionType.ALL
+        )
+        
         # System Configuration table
         self.config_table = dynamodb.Table(
             self, f"Config-{self.environment_name}",
@@ -189,15 +215,27 @@ class NotificationServiceStack(Stack):
     def _create_lambda_functions(self):
         """Create Lambda functions for the notification service"""
         
+        # EventBridge Scheduler role for sending messages directly to SQS
+        self.scheduler_role = iam.Role(
+            self, f"EventBridgeSchedulerRole-{self.environment_name}",
+            role_name=f"NotificationService-EventBridgeSchedulerRole-{self.environment_name}",
+            assumed_by=iam.ServicePrincipal("scheduler.amazonaws.com"),
+        )
+        
+        # Grant EventBridge Scheduler permission to send messages to SQS
+        self.notification_queue.grant_send_messages(self.scheduler_role)
+
         # Common Lambda configuration
         lambda_environment = {
             "USERS_TABLE": self.users_table.table_name,
             "TEMPLATES_TABLE": self.templates_table.table_name,
             "PREFERENCES_TABLE": self.preferences_table.table_name,
+            "SCHEDULES_TABLE": self.schedules_table.table_name,
             "CONFIG_TABLE": self.config_table.table_name,
             "NOTIFICATION_VALIDATION_TABLE": self.notification_validation_table.table_name,
             "NOTIFICATION_QUEUE_URL": self.notification_queue.queue_url,
-            "NOTIFICATION_TOPIC_ARN": self.notification_topic.topic_arn,
+            "NOTIFICATION_QUEUE_ARN": self.notification_queue.queue_arn,
+            "SCHEDULER_ROLE_ARN": self.scheduler_role.role_arn,
             "USER_POOL_ID": self.user_pool.user_pool_id,
             "ENVIRONMENT": self.environment_name,
             "REGION": self.region
@@ -216,6 +254,7 @@ class NotificationServiceStack(Stack):
         self.users_table.grant_read_write_data(lambda_role)
         self.templates_table.grant_read_write_data(lambda_role)
         self.preferences_table.grant_read_write_data(lambda_role)
+        self.schedules_table.grant_read_write_data(lambda_role)
         self.config_table.grant_read_write_data(lambda_role)
         self.notification_validation_table.grant_read_write_data(lambda_role)
         
@@ -224,6 +263,27 @@ class NotificationServiceStack(Stack):
             iam.PolicyStatement(
                 actions=["cognito-idp:*"],
                 resources=[self.user_pool.user_pool_arn]
+            )
+        )
+        
+        # Grant permissions to EventBridge Scheduler
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=[
+                    "scheduler:CreateSchedule",
+                    "scheduler:UpdateSchedule", 
+                    "scheduler:DeleteSchedule",
+                    "scheduler:GetSchedule"
+                ],
+                resources=["*"]
+            )
+        )
+        
+        # Grant permission to pass the scheduler role to EventBridge Scheduler
+        lambda_role.add_to_policy(
+            iam.PolicyStatement(
+                actions=["iam:PassRole"],
+                resources=[self.scheduler_role.role_arn]
             )
         )
         
@@ -307,6 +367,20 @@ class NotificationServiceStack(Stack):
                 batch_size=10,  # Process up to 10 messages at once
                 report_batch_item_failures=True
             )
+        )
+
+        # Schedule Handler Lambda
+        self.schedule_handler = _lambda.Function(
+            self, f"ScheduleHandler-{self.environment_name}",
+            function_name=f"NotificationService-ScheduleHandler-{self.environment_name}",
+            runtime=_lambda.Runtime.PROVIDED_AL2,
+            handler="bootstrap",
+            code=_lambda.Code.from_asset("./build/schedule"),
+            environment=lambda_environment,
+            role=lambda_role,
+            timeout=Duration.seconds(30),
+            memory_size=256,
+            log_retention=logs.RetentionDays.ONE_WEEK
         )
 
     def _create_api_gateway(self):
@@ -415,6 +489,31 @@ class NotificationServiceStack(Stack):
             apigateway.LambdaIntegration(self.config_handler),
         )
         
+        # Scheduled Notifications endpoints
+        scheduled_notifications_resource = api_v1.add_resource("scheduled-notifications")
+        scheduled_notification_resource = scheduled_notifications_resource.add_resource("{scheduleId}")
+        
+        scheduled_notifications_resource.add_method(
+            "GET", 
+            apigateway.LambdaIntegration(self.schedule_handler),
+        )
+        scheduled_notifications_resource.add_method(
+            "POST", 
+            apigateway.LambdaIntegration(self.schedule_handler),
+        )
+        scheduled_notification_resource.add_method(
+            "GET", 
+            apigateway.LambdaIntegration(self.schedule_handler),
+        )
+        scheduled_notification_resource.add_method(
+            "PUT", 
+            apigateway.LambdaIntegration(self.schedule_handler),
+        )
+        scheduled_notification_resource.add_method(
+            "DELETE", 
+            apigateway.LambdaIntegration(self.schedule_handler),
+        )
+        
 
     def _create_outputs(self):
         """Create CloudFormation outputs"""
@@ -465,4 +564,16 @@ class NotificationServiceStack(Stack):
             self, "NotificationValidationTable",
             value=self.notification_validation_table.table_name,
             description="Notification Validation Table"
+        )
+
+        CfnOutput(
+            self, "SchedulerRoleARN",
+            value=self.scheduler_role.role_arn,
+            description="EventBridge Scheduler Role ARN"
+        )
+
+        CfnOutput(
+            self, "SchedulesTable",
+            value=self.schedules_table.table_name,
+            description="Scheduled Notifications Table"
         )

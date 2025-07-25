@@ -291,3 +291,96 @@ class User:
         }
         return self.send_notification_to_queue(id, "notification", recipients, variables)
     
+    # Scheduled Notification Methods
+    def create_scheduled_notification(self, notification_type, variables, cron_expression, timezone="UTC"):
+        """Create a scheduled notification"""
+        body = {
+            "type": notification_type,
+            "variables": variables,
+            "schedule": {
+                "type": "cron",
+                "expression": cron_expression,
+                "timezone": timezone
+            }
+        }
+        return self.make_api_request("POST", "/scheduled-notifications", body=body)
+    
+    def get_scheduled_notifications_list(self, limit=None, next_token=None):
+        """List user's scheduled notifications"""
+        query_params = []
+        if limit:
+            query_params.append(f"limit={limit}")
+        if next_token:
+            query_params.append(f"nextToken={next_token}")
+        
+        query_string = "&".join(query_params)
+        path = "/scheduled-notifications"
+        if query_string:
+            path += f"?{query_string}"
+        
+        return self.make_api_request("GET", path)
+    
+    def get_scheduled_notification_by_id(self, schedule_id):
+        """Get a specific scheduled notification by ID"""
+        return self.make_api_request("GET", f"/scheduled-notifications/{schedule_id}")
+    
+    def update_scheduled_notification(self, schedule_id, variables=None, cron_expression=None, status=None, timezone="UTC"):
+        """Update a scheduled notification"""
+        body = {}
+        
+        if variables is not None:
+            body["variables"] = variables
+            
+        if cron_expression is not None:
+            body["schedule"] = {
+                "type": "cron",
+                "expression": cron_expression,
+                "timezone": timezone
+            }
+            
+        if status is not None:
+            body["status"] = status
+        
+        return self.make_api_request("PUT", f"/scheduled-notifications/{schedule_id}", body=body)
+    
+    def delete_scheduled_notification(self, schedule_id):
+        """Delete a scheduled notification"""
+        return self.make_api_request("DELETE", f"/scheduled-notifications/{schedule_id}")
+    
+    def pause_scheduled_notification(self, schedule_id):
+        """Pause a scheduled notification"""
+        return self.update_scheduled_notification(schedule_id, status="paused")
+    
+    def resume_scheduled_notification(self, schedule_id):
+        """Resume a paused scheduled notification"""
+        return self.update_scheduled_notification(schedule_id, status="active")
+    
+    def cancel_scheduled_notification(self, schedule_id):
+        """Cancel a scheduled notification"""
+        return self.update_scheduled_notification(schedule_id, status="cancelled")
+    
+    # Convenience methods for common scheduled notifications
+    def create_daily_reminder(self, message, hour=9, minute=0):
+        """Create a daily reminder at specified time (default 9:00 AM)"""
+        variables = {"message": message}
+        cron_expression = f"{minute} {hour} * * ? *"  # Daily at specified time (EventBridge Scheduler format)
+        return self.create_scheduled_notification("alert", variables, cron_expression)
+    
+    def create_weekly_report(self, report_type, day_of_week=1, hour=9, minute=0):
+        """Create a weekly report (default Monday 9:00 AM)"""
+        variables = {"reportType": report_type, "period": "weekly"}
+        cron_expression = f"{minute} {hour} ? * {day_of_week} *"  # Weekly on specified day (EventBridge Scheduler format)
+        return self.create_scheduled_notification("report", variables, cron_expression)
+    
+    def create_monthly_summary(self, summary_type, day_of_month=1, hour=9, minute=0):
+        """Create a monthly summary (default 1st of month 9:00 AM)"""
+        variables = {"reportType": summary_type, "period": "monthly"}
+        cron_expression = f"{minute} {hour} {day_of_month} * ? *"  # Monthly on specified day (EventBridge Scheduler format)
+        return self.create_scheduled_notification("report", variables, cron_expression)
+    
+    def create_business_hours_reminder(self, message, hour=9, minute=0):
+        """Create a reminder for business days only (Monday-Friday)"""
+        variables = {"message": message}
+        cron_expression = f"{minute} {hour} ? * MON-FRI *"  # Weekdays only (EventBridge Scheduler format)
+        return self.create_scheduled_notification("notification", variables, cron_expression)
+    

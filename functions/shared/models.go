@@ -44,6 +44,24 @@ type PreferenceItem struct {
 	Enabled  *bool    `json:"enabled,omitempty" dynamodbav:"enabled,omitempty"`
 }
 
+// ScheduledNotification represents a scheduled notification
+type ScheduledNotification struct {
+	ScheduleID string          `json:"scheduleId,omitempty" dynamodbav:"scheduleId,omitempty"`
+	UserID     string          `json:"userId,omitempty" dynamodbav:"userId,omitempty"`
+	Type       string          `json:"type,omitempty" dynamodbav:"type,omitempty"`
+	Variables  map[string]any  `json:"variables,omitempty" dynamodbav:"variables,omitempty"`
+	Schedule   *ScheduleConfig `json:"schedule,omitempty" dynamodbav:"schedule,omitempty"`
+	Status     string          `json:"status,omitempty" dynamodbav:"status,omitempty"` // "active" | "paused" | "cancelled"
+	CreatedAt  *time.Time      `json:"createdAt,omitempty" dynamodbav:"createdAt,omitempty"`
+	UpdatedAt  *time.Time      `json:"updatedAt,omitempty" dynamodbav:"updatedAt,omitempty"`
+}
+
+// ScheduleConfig represents the scheduling configuration
+type ScheduleConfig struct {
+	Type       string `json:"type,omitempty" dynamodbav:"type,omitempty"`             // "one_time" | "recurring" | "cron"
+	Expression string `json:"expression,omitempty" dynamodbav:"expression,omitempty"` // ISO timestamp or cron expression
+}
+
 // SystemConfig represents system configuration
 type SystemConfig struct {
 	Context     string          `json:"context,omitempty" dynamodbav:"context,omitempty"` // "*" for global, userId for user-specific
@@ -139,4 +157,17 @@ const (
 const (
 	RoleSuperAdmin = "super_admin"
 	RoleUser       = "user"
+)
+
+// Constants for schedule types
+const (
+	ScheduleTypeCron = "cron"
+)
+
+// Constants for notification status
+const (
+	StatusActive    = "active"
+	StatusPaused    = "paused"
+	StatusCancelled = "cancelled"
+	StatusCompleted = "completed"
 )

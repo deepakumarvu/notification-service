@@ -16,7 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
-	"github.com/aws/aws-sdk-go-v2/service/eventbridge"
+	"github.com/aws/aws-sdk-go-v2/service/scheduler"
 	"github.com/aws/aws-sdk-go-v2/service/ses"
 	"github.com/aws/aws-sdk-go-v2/service/sns"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
@@ -24,12 +24,12 @@ import (
 
 // AWS service clients
 var (
-	DynamoDBClient    *dynamodb.Client
-	SQSClient         *sqs.Client
-	SNSClient         *sns.Client
-	SESClient         *ses.Client
-	EventBridgeClient *eventbridge.Client
-	AWSConfig         aws.Config
+	DynamoDBClient  *dynamodb.Client
+	SQSClient       *sqs.Client
+	SNSClient       *sns.Client
+	SESClient       *ses.Client
+	SchedulerClient *scheduler.Client
+	AWSConfig       aws.Config
 )
 
 // Environment variables
@@ -37,10 +37,13 @@ var (
 	UsersTable                  string
 	TemplatesTable              string
 	PreferencesTable            string
+	SchedulesTable              string
 	ConfigTable                 string
 	NotificationValidationTable string
 	NotificationQueueURL        string
 	NotificationTopicARN        string
+	SchedulerRoleArn            string
+	NotificationQueueArn        string
 	UserPoolID                  string
 	Environment                 string
 	Region                      string
@@ -52,10 +55,13 @@ func InitAWS() {
 	UsersTable = os.Getenv("USERS_TABLE")
 	TemplatesTable = os.Getenv("TEMPLATES_TABLE")
 	PreferencesTable = os.Getenv("PREFERENCES_TABLE")
+	SchedulesTable = os.Getenv("SCHEDULES_TABLE")
 	ConfigTable = os.Getenv("CONFIG_TABLE")
 	NotificationValidationTable = os.Getenv("NOTIFICATION_VALIDATION_TABLE")
 	NotificationQueueURL = os.Getenv("NOTIFICATION_QUEUE_URL")
 	NotificationTopicARN = os.Getenv("NOTIFICATION_TOPIC_ARN")
+	SchedulerRoleArn = os.Getenv("SCHEDULER_ROLE_ARN")
+	NotificationQueueArn = os.Getenv("NOTIFICATION_QUEUE_ARN")
 	UserPoolID = os.Getenv("USER_POOL_ID")
 	Environment = os.Getenv("ENVIRONMENT")
 	Region = os.Getenv("REGION")
@@ -74,7 +80,7 @@ func InitAWS() {
 	SQSClient = sqs.NewFromConfig(AWSConfig)
 	SNSClient = sns.NewFromConfig(AWSConfig)
 	SESClient = ses.NewFromConfig(AWSConfig)
-	EventBridgeClient = eventbridge.NewFromConfig(AWSConfig)
+	SchedulerClient = scheduler.NewFromConfig(AWSConfig)
 }
 
 // CreateAPIResponse creates a standard API Gateway response
@@ -155,7 +161,7 @@ func GetCurrentTime() time.Time {
 	return time.Now().UTC()
 }
 
-// GetUserIDFromContext extracts user ID from the Lambda context/claims
+// GetUserContext extracts user ID from the Lambda context/claims
 // This would be populated by the API Gateway Cognito authorizer
 func GetUserContext(requestContext events.APIGatewayProxyRequestContext) (UserContext, error) {
 	// With Cognito User Pool authorizer, claims are in requestContext.Authorizer
