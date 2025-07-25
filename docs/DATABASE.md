@@ -13,21 +13,15 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 **Primary Key:**
 - Partition Key: `userId` (String)
 
-**Global Secondary Indexes:**
-- **GSI1**: `email` (Partition Key)
-  - Purpose: User lookup by email address
-  - Projection: ALL
-
 **Attributes:**
 ```json
 {
-  "userId": "string",           // Unique user identifier
-  "email": "string",           // User email (unique)
+  "userId": "string",           // Unique user identifier (PK)
+  "email": "string",           // User email
   "role": "string",            // "super_admin" | "user"
-  "cognitoUserId": "string",   // Cognito user pool user ID
   "isActive": "boolean",       // Account status
   "createdAt": "string",       // ISO 8601 timestamp
-  "updatedAt": "string",       // ISO 8601 timestamp
+  "updatedAt": "string"        // ISO 8601 timestamp
 }
 ```
 
@@ -37,7 +31,6 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
   "userId": "user-550e8400-e29b-41d4-a716-446655440000",
   "email": "john.doe@company.com",
   "role": "user",
-  "cognitoUserId": "us-east-1:12345678-1234-1234-1234-123456789012",
   "isActive": true,
   "createdAt": "2024-01-15T10:30:00Z",
   "updatedAt": "2024-01-15T10:30:00Z"
@@ -46,7 +39,6 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 
 **Access Patterns:**
 - Get user by ID: Query by `userId`
-- Get user by email: Query GSI1 by `email`
 - List all users: Scan (admin only, with pagination)
 
 ### 2. Templates Table
@@ -60,11 +52,9 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 **Attributes:**
 ```json
 {
-  "context": "string",      // "*" | "<userid>"
-  "type#channel": "string", // "alert#email" | "report#email" | "notification#in_app"
-  "name": "string",           // Template display name
-  "content": "string",        // Template content with placeholders
-  "variables": ["string"],    // Array of required variables
+  "context": "string",        // "*" for global templates | "<userid>" for user-specific
+  "type#channel": "string",   // "alert#email" | "report#slack" | "notification#in_app"
+  "content": "string",        // Template content with {{placeholders}}
   "isActive": "boolean",      // Template status
   "createdAt": "string",      // ISO 8601 timestamp
   "updatedAt": "string"       // ISO 8601 timestamp
@@ -76,9 +66,7 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 {
   "context": "user-550e8400-e29b-41d4-a716-446655440000",
   "type#channel": "alert#email",
-  "name": "Server Down Alert",
-  "content": "ALERT: Server {{serverName}} in {{environment}} is currently {{status}}. Immediate attention required.",
-  "variables": ["serverName", "environment", "status"],
+  "content": "{\"subject\": \"Alert: {{serverName}} in {{environment}}\", \"body\": \"Server {{serverName}} in {{environment}} is {{status}} with message {{message}}\"}",
   "isActive": true,
   "createdAt": "2024-01-15T10:30:00Z",
   "updatedAt": "2024-01-15T10:30:00Z"
@@ -86,9 +74,9 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 ```
 
 **Access Patterns:**
-- Get template by ID: Query by `context` and `type#channel`
-- Get user's/global templates: Query by `context`
-- Get templates by type: Query by `type`
+- Get template by context and type#channel: Query by `context` and `type#channel`
+- Get templates by context: Query by `context`
+- List templates for user/global: Query by `context`
 
 ### 3. User Preferences Table
 
@@ -100,17 +88,17 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 **Attributes:**
 ```json
 {
-  "context": "string",          // "*" | "<userid>"
+  "context": "string",          // "*" for global | "<userid>" for user-specific
   "preferences": {
-    "alerts": {
+    "alert": {
       "channels": ["string"],  // Array of enabled channels
       "enabled": "boolean"     // Overall type enabled/disabled
     },
-    "reports": {
+    "report": {
       "channels": ["string"],
       "enabled": "boolean"
     },
-    "notifications": {
+    "notification": {
       "channels": ["string"],
       "enabled": "boolean"
     }
@@ -127,15 +115,15 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 {
   "context": "user-550e8400-e29b-41d4-a716-446655440000",
   "preferences": {
-    "alerts": {
+    "alert": {
       "channels": ["email", "slack"],
       "enabled": true
     },
-    "reports": {
+    "report": {
       "channels": ["email"],
       "enabled": true
     },
-    "notifications": {
+    "notification": {
       "channels": ["in_app"],
       "enabled": true
     }
@@ -160,30 +148,22 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 - Partition Key: `scheduleId` (String)
 
 **Global Secondary Indexes:**
-- **GSI1**: `userId` (Partition Key), `createdAt` (Sort Key)
+- **UserIndex**: `userId` (Partition Key), `createdAt` (Sort Key)
   - Purpose: Get user's scheduled notifications
-  - Projection: ALL
-- **GSI2**: `status` (Partition Key), `nextRun` (Sort Key)
-  - Purpose: Get active schedules for processing
   - Projection: ALL
 
 **Attributes:**
 ```json
 {
-  "scheduleId": "string",      // Unique schedule identifier
-  "userId": "string",          // Owner user ID
+  "scheduleId": "string",      // Unique schedule identifier (PK)
+  "userId": "string",          // Owner user ID (GSI)
   "type": "string",           // "alert" | "report" | "notification"
   "variables": {},            // Template variables object
   "schedule": {
-    "type": "string",         // "one_time" | "recurring" | "cron"
-    "expression": "string",   // ISO timestamp or cron expression
-    "timezone": "string"      // Timezone for scheduling
+    "type": "string",         // "cron"
+    "expression": "string"    // Cron expression (EventBridge Scheduler format)
   },
   "status": "string",         // "active" | "paused" | "cancelled" | "completed"
-  "nextRun": "string",        // ISO 8601 timestamp of next execution
-  "lastRun": "string",        // ISO 8601 timestamp of last execution
-  "runCount": "number",       // Number of times executed
-  "eventBridgeRuleArn": "string", // EventBridge rule ARN
   "createdAt": "string",      // ISO 8601 timestamp
   "updatedAt": "string"       // ISO 8601 timestamp
 }
@@ -194,21 +174,18 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 {
   "scheduleId": "schedule-550e8400-e29b-41d4-a716-446655440002",
   "userId": "user-550e8400-e29b-41d4-a716-446655440000",
-  "type": "report",
+  "type": "alert",
   "variables": {
-    "reportType": "daily",
-    "department": "engineering"
+    "serverName": "web-server-01",
+    "environment": "production",
+    "status": "critical",
+    "message": "High CPU usage"
   },
   "schedule": {
     "type": "cron",
-    "expression": "0 9 * * MON-FRI",
-    "timezone": "UTC"
+    "expression": "0 9 * * ? *"
   },
   "status": "active",
-  "nextRun": "2024-01-16T09:00:00Z",
-  "lastRun": "2024-01-15T09:00:00Z",
-  "runCount": 5,
-  "eventBridgeRuleArn": "arn:aws:events:ap-south-1:123456789012:rule/notification-schedule-550e8400",
   "createdAt": "2024-01-15T10:30:00Z",
   "updatedAt": "2024-01-15T10:30:00Z"
 }
@@ -216,9 +193,9 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 
 **Access Patterns:**
 - Get schedule by ID: Query by `scheduleId`
-- Get user's schedules: Query GSI1 by `userId`
-- Get active schedules for processing: Query GSI2 by `status = "active"`
-- Get schedules by next run time: Query LSI1
+- Get user's schedules: Query UserIndex by `userId`
+- List all schedules: Scan (admin only, with pagination)
+- Get active schedules: Scan with filter by `status = "active"`
 
 ### 5. System Configuration Table
 
@@ -230,11 +207,25 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 **Attributes:**
 ```json
 {
-  "context": "string",       // "*" | "<userid>"
-  "config": {},          // Configuration value (can be any JSON type)
-  "type": "string",      // "slack" | "in_app" | "email"
-  "createdAt": "timestamp", // ISO 8601 timestamp
-  "updatedAt": "timestamp"  // ISO 8601 timestamp
+  "context": "string",       // "*" for global | "<userid>" for user-specific
+  "config": {
+    "slack": {
+      "webhookUrl": "string",
+      "enabled": "boolean"
+    },
+    "email": {
+      "fromAddress": "string",
+      "replyToAddress": "string",
+      "enabled": "boolean"
+    },
+    "inApp": {
+      "platformAppIds": ["string"],
+      "enabled": "boolean"
+    }
+  },
+  "description": "string",      // Configuration description
+  "createdAt": "string",        // ISO 8601 timestamp
+  "updatedAt": "string"         // ISO 8601 timestamp
 }
 ```
 
@@ -244,31 +235,79 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
   {
     "context": "*",
     "config": {
-      "slack": "https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX"
+      "slack": {
+        "enabled": true
+      },
+      "email": {
+        "fromAddress": "notifications@company.com",
+        "replyToAddress": "noreply@company.com",
+        "enabled": true
+      },
+      "inApp": {
+        "enabled": true
+      }
     },
-    "type": "slack",
+    "description": "Global system configuration",
     "createdAt": "2024-01-15T10:30:00Z",
     "updatedAt": "2024-01-15T10:30:00Z"
   },
   {
-    "context": "*",
+    "context": "user-550e8400-e29b-41d4-a716-446655440000",
     "config": {
-      "email": {
-        "fromAddress": "notifications@company.com",
-        "replyTo": "noreply@company.com",
-        "defaultSubjectPrefix": "[Notification Service]"
+      "slack": {
+        "webhookUrl": "https://hooks.slack.com/services/USER/WEBHOOK/URL",
+        "enabled": true
+      },
+      "inApp": {
+        "platformAppIds": ["app1", "app2"],
+        "enabled": true
       }
     },
-    "type": "email",
-    "createdAt": "2024-01-15T10:30:00Z",
-    "updatedAt": "2024-01-15T10:30:00Z"
+    "description": "User-specific configuration",
+    "createdAt": "2024-01-15T11:00:00Z",
+    "updatedAt": "2024-01-15T11:00:00Z"
   }
 ]
 ```
 
 **Access Patterns:**
-- Get configuration by key: Query by `configKey`
-- Get all configurations: Scan (admin only)
+- Get configuration by context: Query by `context`
+- List all configurations: Scan (admin only)
+
+### 6. Notification Validation Table
+
+**Table Name:** `notification-service-validation`
+
+**Primary Key:**
+- Partition Key: `id#userId#type#channel` (String)
+
+**TTL Attribute:** `expiresAt` (Number) - Records expire after 1 day
+
+**Attributes:**
+```json
+{
+  "id#userId#type#channel": "string", // Composite key: notificationId#userId#type#channel
+  "content": "string",                 // Processed notification content
+  "createdAt": "string",              // ISO 8601 timestamp
+  "error": "string",                  // Error message if delivery failed
+  "expiresAt": "number"               // Unix timestamp for TTL (1 day from creation)
+}
+```
+
+**Sample Record:**
+```json
+{
+  "id#userId#type#channel": "alert-123#user-456#alert#email",
+  "content": "Alert: web-server-01 is critical in production with message High CPU usage",
+  "createdAt": "2024-01-15T10:30:00Z",
+  "expiresAt": 1705406600
+}
+```
+
+**Access Patterns:**
+- Get validation by composite key: Query by `id#userId#type#channel`
+- Records automatically expire after 1 day (TTL)
+- Used for testing and delivery verification
 
 ## DynamoDB Configuration
 
@@ -295,19 +334,22 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 **Hot Partitions:**
 - User ID distribution ensures even partition usage
 - Template access patterns spread across user partitions
-- Schedule processing distributed by status and time
+- Schedule processing distributed by user and time
+- Validation table uses composite keys for distribution
 
 **Query Patterns:**
 - Most queries use partition key for efficient access
-- GSI queries provide required access patterns
+- GSI queries provide required access patterns for user-specific data
 - Scan operations limited to admin functions with pagination
+- TTL automatically manages validation data lifecycle
 
 **Item Size:**
 - Users: ~1KB average
 - Templates: ~2-5KB average
-- Preferences: ~1KB average
-- Schedules: ~2KB average
-- Config: Variable (1-10KB)
+- Preferences: ~1-2KB average
+- Schedules: ~1-3KB average
+- Config: 1-10KB depending on configuration complexity
+- Validation: ~1KB average
 
 ### Backup Strategy
 
@@ -328,7 +370,7 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 
 **Data Classification:**
 - PII: User emails (encrypted at rest)
-- Sensitive: Configuration secrets (marked with isSecret flag)
+- Sensitive: Configuration secrets (Slack webhooks, etc.)
 - Public: Templates, preferences (non-sensitive)
 
 ### Monitoring
@@ -338,11 +380,13 @@ The notification service uses Amazon DynamoDB as the primary database, designed 
 - Throttled requests
 - System errors
 - User errors
+- TTL deletes (validation table)
 
 **Alarms:**
 - High error rates
 - Throttling events
 - Unusual access patterns
+- TTL processing issues
 
 ### Migration Strategy
 
