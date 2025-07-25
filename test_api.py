@@ -2,6 +2,7 @@ import pytest
 from testutils.test_user import User
 import os
 import json
+import time
 
 with open('cdk-outputs.json', 'r') as f:
     data = json.load(f)
@@ -12,18 +13,19 @@ ACCOUNT_ID = data[f"NotificationService-{ENVIRONMENT}"]["AccountId"]
 USER_POOL_ID = data[f"NotificationService-{ENVIRONMENT}"]["UserPoolId"]
 USER_POOL_CLIENT_ID = data[f"NotificationService-{ENVIRONMENT}"]["UserPoolClientId"]
 API_GATEWAY_URL = data[f"NotificationService-{ENVIRONMENT}"]["APIGatewayURL"]
+NOTIFICATION_QUEUE_URL = data[f"NotificationService-{ENVIRONMENT}"]["NotificationQueueURL"]
     
 
 @pytest.fixture(scope="session")
 def test_super_admin():
-    admin = User("super_admin2@company.com", "TestPassword10!", "super_admin", REGION, USER_POOL_ID, USER_POOL_CLIENT_ID, API_GATEWAY_URL)
+    admin = User("super_admin2@company.com", "TestPassword10!", "super_admin", REGION, USER_POOL_ID, USER_POOL_CLIENT_ID, API_GATEWAY_URL, NOTIFICATION_QUEUE_URL)
     admin.create_user()
     admin.authenticate_user()
     yield admin
 
 @pytest.fixture(scope="session")
 def test_user():
-    user = User("user1@company.com", "TestPassword10!", "user", REGION, USER_POOL_ID, USER_POOL_CLIENT_ID, API_GATEWAY_URL)
+    user = User("user1@company.com", "TestPassword10!", "user", REGION, USER_POOL_ID, USER_POOL_CLIENT_ID, API_GATEWAY_URL, NOTIFICATION_QUEUE_URL)
     user.create_user()
     user.authenticate_user()
     yield user
@@ -618,4 +620,93 @@ def test_system_config_super_admin_global_replacement(test_super_admin: User):
     assert "enabled" not in response_json["config"]["slack"] or response_json["config"]["slack"]["enabled"] is None
     
     # Clean up
+    test_super_admin.delete_system_config("*")
+
+def test_notification_queue_publishing(test_super_admin: User, test_user: User):
+
+    # Setup Global Template, Preferences, System Config
+    response = test_super_admin.create_template("*", "alert", "email", "{\"subject\": \"There is an alert in {{serverName}} in {{environment}}\", \"body\": \"There is an alert in {{serverName}} in {{environment}} with status {{status}} and message {{message}}\"}")
+    print(response.json())
+    response = test_super_admin.create_template("*", "alert", "slack", "Alert: {{serverName}} is {{status}} in {{environment}}")
+    print(response.json())
+    response = test_super_admin.create_template("*", "alert", "in_app", "Alert: {{serverName}} is {{status}} in {{environment}}")
+    print(response.json())
+    
+    response = test_super_admin.create_template("*", "report", "email", "{\"subject\": \"There is a report in {{reportType}} for {{period}}\", \"body\": \"There is a report in {{reportType}} for {{period}} with data {{data}}\"}")
+    print(response.json())
+    response = test_super_admin.create_template("*", "report", "slack", "Report: {{reportType}} for {{period}} is {{data}}")
+    print(response.json())
+    response = test_super_admin.create_template("*", "report", "in_app", "Report: {{reportType}} for {{period}} is {{data}}")
+    print(response.json())
+    
+    response = test_super_admin.create_template("*", "notification", "email", "{\"subject\": \"There is a notification in {{title}}\", \"body\": \"There is a notification in {{title}} with message {{message}} and action url {{actionUrl}}\"}")
+    print(response.json())
+    response = test_super_admin.create_template("*", "notification", "slack", "Notification: {{title}} is {{message}} with {{actionUrl}}")
+    print(response.json())
+    response = test_super_admin.create_template("*", "notification", "in_app", "Notification: {{title}} is {{message}} with {{actionUrl}}")
+    print(response.json())
+    
+    response = test_super_admin.create_user_preferences("*", {"alert": {"channels": ["email", "slack", "in_app"], "enabled": True}, "report": {"channels": ["email", "slack", "in_app"], "enabled": True}, "notification": {"channels": ["email", "slack", "in_app"], "enabled": True}}, "UTC", "en")
+    print(response.json())
+    response = test_super_admin.create_system_config("*", {"email": {"fromAddress": "notifications@company.com", "replyToAddress": "noreply@company.com", "enabled": True}, 
+                                                "slack": {"enabled": True}, 
+                                                "inApp": {"enabled": True}}, "Global config")
+    print(response.json())
+    
+    # Test sending alert notification
+    alert_response = test_user.send_alert_notification(
+        recipients=[test_user.user_id, test_super_admin.user_id],
+        server_name="web-server-01",
+        environment="production",
+        status="critical",
+        message="High CPU usage detected"
+    )
+    assert "MessageId" in alert_response
+    
+    # Test sending report notification
+    report_response = test_super_admin.send_report_notification(
+        recipients=[test_super_admin.user_id],
+        report_name="Weekly Performance Report",
+        time_period="2024-01-01 to 2024-01-07",
+        summary="System performance metrics for the past week"
+    )
+    assert "MessageId" in report_response
+    
+    # Test sending general notification
+    notification_response = test_user.send_general_notification(
+        recipients=[test_user.user_id],
+        title="System Maintenance",
+        message="Scheduled maintenance will begin at 2 AM UTC",
+        action_url="https://example.com/acknowledge"
+    )
+    assert "MessageId" in notification_response
+    
+    # Test custom notification with custom variables
+    custom_response = test_super_admin.send_notification_to_queue(
+        notification_type="alert",
+        recipients=[test_user.user_id],
+        variables={
+            "serverName": "database-01",
+            "environment": "staging",
+            "status": "warning",
+            "message": "Disk space running low",
+        }
+    )
+    assert "MessageId" in custom_response
+    
+    # TODO: Validate the notifications sent to the users
+    
+    time.sleep(15)
+    
+    # Clean up
+    test_super_admin.delete_template("*", "alert", "email")
+    test_super_admin.delete_template("*", "alert", "slack")
+    test_super_admin.delete_template("*", "alert", "in_app")
+    test_super_admin.delete_template("*", "report", "email")
+    test_super_admin.delete_template("*", "report", "slack")
+    test_super_admin.delete_template("*", "report", "in_app")
+    test_super_admin.delete_template("*", "notification", "email")
+    test_super_admin.delete_template("*", "notification", "slack")
+    test_super_admin.delete_template("*", "notification", "in_app")
+    test_super_admin.delete_user_preferences("*")
     test_super_admin.delete_system_config("*")

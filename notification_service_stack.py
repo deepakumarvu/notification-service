@@ -28,6 +28,9 @@ class NotificationServiceStack(Stack):
         # Create Cognito User Pool
         self._create_cognito_user_pool()
         
+        # Create SQS Queue
+        self._create_sqs_queue()
+        
         # Create Lambda functions
         self._create_lambda_functions()
         
@@ -144,6 +147,27 @@ class NotificationServiceStack(Stack):
             refresh_token_validity=Duration.days(30)
         )
 
+    def _create_sqs_queue(self):
+        """Create SQS queue for notification processing"""
+        
+        # Dead letter queue
+        self.dlq = sqs.Queue(
+            self, f"NotificationDLQ-{self.environment_name}",
+            queue_name=f"notification-service-dlq-{self.environment_name}",
+            retention_period=Duration.days(14)
+        )
+        
+        # Main notification queue
+        self.notification_queue = sqs.Queue(
+            self, f"NotificationQueue-{self.environment_name}",
+            queue_name=f"notification-service-queue-{self.environment_name}",
+            visibility_timeout=Duration.minutes(5),
+            dead_letter_queue=sqs.DeadLetterQueue(
+                max_receive_count=3,
+                queue=self.dlq
+            )
+        )
+
     def _create_lambda_functions(self):
         """Create Lambda functions for the notification service"""
         
@@ -153,6 +177,8 @@ class NotificationServiceStack(Stack):
             "TEMPLATES_TABLE": self.templates_table.table_name,
             "PREFERENCES_TABLE": self.preferences_table.table_name,
             "CONFIG_TABLE": self.config_table.table_name,
+            "NOTIFICATION_QUEUE_URL": self.notification_queue.queue_url,
+            "NOTIFICATION_TOPIC_ARN": self.notification_topic.topic_arn,
             "USER_POOL_ID": self.user_pool.user_pool_id,
             "ENVIRONMENT": self.environment_name,
             "REGION": self.region
@@ -235,6 +261,32 @@ class NotificationServiceStack(Stack):
             timeout=Duration.seconds(30),
             memory_size=256,
             log_retention=logs.RetentionDays.ONE_WEEK
+        )
+
+        # Notification Processor Lambda
+        self.processor_handler = _lambda.Function(
+            self, f"ProcessorHandler-{self.environment_name}",
+            function_name=f"NotificationService-ProcessorHandler-{self.environment_name}",
+            runtime=_lambda.Runtime.PROVIDED_AL2,
+            handler="bootstrap",
+            code=_lambda.Code.from_asset("./build/processor"),
+            environment=lambda_environment,
+            role=lambda_role,
+            timeout=Duration.seconds(60),  # Longer timeout for processing
+            memory_size=512,               # More memory for processing multiple recipients
+            log_retention=logs.RetentionDays.ONE_WEEK
+        )
+
+        # Grant SQS permissions to the processor
+        self.notification_queue.grant_consume_messages(lambda_role)
+
+        # Add SQS event source to trigger the processor
+        self.processor_handler.add_event_source(
+            lambda_event_sources.SqsEventSource(
+                self.notification_queue,
+                batch_size=10,  # Process up to 10 messages at once
+                report_batch_item_failures=True
+            )
         )
 
     def _create_api_gateway(self):
@@ -375,4 +427,16 @@ class NotificationServiceStack(Stack):
             self, "AccountId",
             value=self.account,
             description="AWS Account ID"
+        )
+
+        CfnOutput(
+            self, "NotificationQueueURL",
+            value=self.notification_queue.queue_url,
+            description="Notification Queue URL"
+        )
+
+        CfnOutput(
+            self, "NotificationQueueARN",
+            value=self.notification_queue.queue_arn,
+            description="Notification Queue ARN"
         )

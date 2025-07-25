@@ -3,25 +3,29 @@ from datetime import datetime, timezone
 import jwt
 import requests
 import logging
+import json
 from urllib.parse import quote
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 class User:
-    def __init__(self, email, password, role, region, user_pool_id, user_pool_client_id, api_gateway_url):
+    def __init__(self, email, password, role, region, user_pool_id, user_pool_client_id, api_gateway_url, notification_queue_url):
         self.user_id = None
         self.email = email
         self.password = password
         self.role = role
+        self.region = region
         self.cognito_client = boto3.client('cognito-idp', region_name=region)
         self.dynamodb_client = boto3.client('dynamodb', region_name=region)
+        self.sqs_client = boto3.client('sqs', region_name=region)
         self.id_token = None
         self.access_token = None
         self.refresh_token = None
         self.user_pool_id = user_pool_id
         self.user_pool_client_id = user_pool_client_id
         self.api_gateway_url = api_gateway_url
+        self.notification_queue_url = notification_queue_url
 
     def __str__(self):
         return f"User(user_id={self.user_id}, email={self.email}, role={self.role})"
@@ -235,4 +239,55 @@ class User:
     def delete_system_config(self, context):
         """Delete system config by context"""
         return self.make_api_request("DELETE", f"/config?context={context}")
+    
+    def send_notification_to_queue(self, id, notification_type, recipients, variables=None):
+        """Send a notification request to SQS queue"""
+        if variables is None:
+            variables = {}
+            
+        message_body = {
+            "id": id,
+            "type": notification_type,
+            "recipients": recipients if isinstance(recipients, list) else [recipients],
+            "variables": variables
+        }
+        
+        try:
+            response = self.sqs_client.send_message(
+                QueueUrl=self.notification_queue_url,
+                MessageBody=json.dumps(message_body)
+            )
+            logger.info(f"Sent {notification_type} notification to queue. MessageId: {response['MessageId']}")
+            return response
+        except Exception as e:
+            logger.error(f"Failed to send notification to queue: {e}")
+            raise
+    
+    def send_alert_notification(self, id, recipients, server_name, environment, status="critical", message="System alert"):
+        """Send an alert notification"""
+        variables = {
+            "serverName": server_name,
+            "environment": environment,
+            "status": status,
+            "message": message
+        }
+        return self.send_notification_to_queue(id, "alert", recipients, variables)
+    
+    def send_report_notification(self, id, recipients, report_name, time_period, summary="Report generated"):
+        """Send a report notification"""
+        variables = {
+            "reportType": report_name,
+            "period": time_period,
+            "data": summary,
+        }
+        return self.send_notification_to_queue(id, "report", recipients, variables)
+    
+    def send_general_notification(self, id, recipients, title, message, action_url=None):
+        """Send a general notification"""
+        variables = {
+            "title": title,
+            "message": message,
+            "actionUrl": action_url
+        }
+        return self.send_notification_to_queue(id, "notification", recipients, variables)
     

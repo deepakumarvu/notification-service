@@ -79,6 +79,14 @@ type InAppSettings struct {
 	Enabled        *bool    `json:"enabled,omitempty" dynamodbav:"enabled,omitempty"`
 }
 
+// NotificationRequest represents a request to send a notification
+type NotificationRequest struct {
+	ID         string         `json:"id"`
+	Type       string         `json:"type"`
+	Recipients []string       `json:"recipients"`
+	Variables  map[string]any `json:"variables"`
+}
+
 // APIResponse represents a standard API response
 type APIResponse struct {
 	StatusCode int               `json:"statusCode"`
