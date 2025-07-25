@@ -37,6 +37,7 @@ var (
 	UsersTable           string
 	TemplatesTable       string
 	PreferencesTable     string
+	ConfigTable          string
 	UserPoolID           string
 	Environment          string
 	Region               string
@@ -48,6 +49,7 @@ func InitAWS() {
 	UsersTable = os.Getenv("USERS_TABLE")
 	TemplatesTable = os.Getenv("TEMPLATES_TABLE")
 	PreferencesTable = os.Getenv("PREFERENCES_TABLE")
+	ConfigTable = os.Getenv("CONFIG_TABLE")
 	UserPoolID = os.Getenv("USER_POOL_ID")
 	Environment = os.Getenv("ENVIRONMENT")
 	Region = os.Getenv("REGION")
@@ -230,4 +232,17 @@ func ValidateTemplateFixedVariables(notificationType string, providedVars []stri
 		}
 	}
 	return invalid
+}
+
+func ValidateContext(context string, userContext UserContext) (string, APIResponse) {
+	context = strings.TrimSpace(context)
+	if context == "*" && userContext.Role != RoleSuperAdmin {
+		return "", CreateErrorResponse(http.StatusForbidden, "Global context is only allowed for super admins", nil)
+	}
+
+	if userContext.Role == RoleUser || context == "" {
+		context = userContext.UserID
+	}
+
+	return context, APIResponse{}
 }

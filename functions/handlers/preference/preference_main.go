@@ -20,18 +20,6 @@ func init() {
 	shared.InitAWS()
 }
 
-func validateContext(context string, userContext shared.UserContext) (string, shared.APIResponse) {
-	if context == "*" && userContext.Role != shared.RoleSuperAdmin {
-		return "", shared.CreateErrorResponse(http.StatusForbidden, "Global preferences are only allowed for super admins", nil)
-	}
-
-	if userContext.Role == shared.RoleUser || context == "" {
-		context = userContext.UserID
-	}
-
-	return context, shared.APIResponse{}
-}
-
 func handler(ctx context.Context, event events.APIGatewayProxyRequest) (shared.APIResponse, error) {
 	shared.LogInfo().Str("method", event.HTTPMethod).Str("path", event.Path).Msg("Preference handler invoked")
 
@@ -74,7 +62,7 @@ func createUserPreferences(ctx context.Context, event events.APIGatewayProxyRequ
 		return shared.CreateErrorResponse(http.StatusBadRequest, "Invalid request body", nil), nil
 	}
 
-	context, errResponse := validateContext(request.Context, userContext)
+	context, errResponse := shared.ValidateContext(request.Context, userContext)
 	if context == "" {
 		return errResponse, nil
 	}
@@ -134,7 +122,7 @@ func updateUserPreferences(ctx context.Context, event events.APIGatewayProxyRequ
 		return shared.CreateErrorResponse(http.StatusBadRequest, "Invalid request body", nil), nil
 	}
 
-	context, errResponse := validateContext(request.Context, userContext)
+	context, errResponse := shared.ValidateContext(request.Context, userContext)
 	if context == "" {
 		return errResponse, nil
 	}
@@ -188,7 +176,7 @@ func updateUserPreferences(ctx context.Context, event events.APIGatewayProxyRequ
 }
 
 func getUserPreferences(ctx context.Context, event events.APIGatewayProxyRequest, userContext shared.UserContext) (shared.APIResponse, error) {
-	context, errResponse := validateContext(event.QueryStringParameters[ContextQueryParam], userContext)
+	context, errResponse := shared.ValidateContext(event.QueryStringParameters[ContextQueryParam], userContext)
 	if context == "" {
 		return errResponse, nil
 	}
@@ -239,7 +227,7 @@ func listUserPreferences(ctx context.Context, event events.APIGatewayProxyReques
 }
 
 func deleteUserPreferences(ctx context.Context, event events.APIGatewayProxyRequest, userContext shared.UserContext) (shared.APIResponse, error) {
-	context, errResponse := validateContext(event.QueryStringParameters[ContextQueryParam], userContext)
+	context, errResponse := shared.ValidateContext(event.QueryStringParameters[ContextQueryParam], userContext)
 	if context == "" {
 		return errResponse, nil
 	}

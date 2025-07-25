@@ -44,6 +44,41 @@ type PreferenceItem struct {
 	Enabled  *bool    `json:"enabled,omitempty" dynamodbav:"enabled,omitempty"`
 }
 
+// SystemConfig represents system configuration
+type SystemConfig struct {
+	Context     string          `json:"context,omitempty" dynamodbav:"context,omitempty"` // "*" for global, userId for user-specific
+	Config      *SystemSettings `json:"config,omitempty" dynamodbav:"config,omitempty"`   // The actual configuration object
+	Description string          `json:"description,omitempty" dynamodbav:"description,omitempty"`
+	CreatedAt   *time.Time      `json:"createdAt,omitempty" dynamodbav:"createdAt,omitempty"`
+	UpdatedAt   *time.Time      `json:"updatedAt,omitempty" dynamodbav:"updatedAt,omitempty"`
+}
+
+// SystemSettings represents the actual system settings data
+type SystemSettings struct {
+	SlackSettings SlackSettings `json:"slack,omitempty" dynamodbav:"slack,omitempty"`
+	EmailSettings EmailSettings `json:"email,omitempty" dynamodbav:"email,omitempty"`
+	InAppSettings InAppSettings `json:"inApp,omitempty" dynamodbav:"inApp,omitempty"`
+}
+
+// SlackSettings represents Slack configuration
+type SlackSettings struct {
+	WebhookURL string `json:"webhookUrl,omitempty" dynamodbav:"webhookUrl,omitempty"`
+	Enabled    *bool  `json:"enabled,omitempty" dynamodbav:"enabled,omitempty"`
+}
+
+// EmailSettings represents email configuration
+type EmailSettings struct {
+	FromAddress    string `json:"fromAddress,omitempty" dynamodbav:"fromAddress,omitempty"`
+	ReplyToAddress string `json:"replyToAddress,omitempty" dynamodbav:"replyToAddress,omitempty"`
+	Enabled        *bool  `json:"enabled,omitempty" dynamodbav:"enabled,omitempty"`
+}
+
+// InAppSettings represents in-app notification configuration
+type InAppSettings struct {
+	PlatformAppIDs []string `json:"platformAppIds,omitempty" dynamodbav:"platformAppIds,omitempty"`
+	Enabled        *bool    `json:"enabled,omitempty" dynamodbav:"enabled,omitempty"`
+}
+
 // APIResponse represents a standard API response
 type APIResponse struct {
 	StatusCode int               `json:"statusCode"`

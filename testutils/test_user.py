@@ -195,3 +195,44 @@ class User:
         """Delete user preferences by context"""
         return self.make_api_request("DELETE", f"/preferences?context={context}")
     
+    def create_system_config(self, context, config=None, description=None):
+        """Create system config"""
+        body = {"context": context}
+        if config:
+            body["config"] = config
+        if description:
+            body["description"] = description
+        return self.make_api_request("POST", "/config", body=body)
+    
+    def get_system_config(self, context):
+        """Get system config by context"""
+        return self.make_api_request("GET", f"/config?context={context}")
+    
+    def get_system_config_list(self, limit=None, next_token=None):
+        """List all system configs (super admin only)"""
+        query_params = []
+        if limit:
+            query_params.append(f"limit={limit}")
+        if next_token:
+            query_params.append(f"nextToken={next_token}")
+        
+        query_string = "&".join(query_params)
+        path = "/config"
+        if query_string:
+            path += f"?{query_string}"
+        
+        return self.make_api_request("GET", path)
+    
+    def update_system_config(self, context, config=None, description=None):
+        """Update system config"""
+        body = {"context": context}
+        if config is not None:
+            body["config"] = config
+        if description is not None:
+            body["description"] = description
+        return self.make_api_request("PUT", "/config", body=body)
+    
+    def delete_system_config(self, context):
+        """Delete system config by context"""
+        return self.make_api_request("DELETE", f"/config?context={context}")
+    
